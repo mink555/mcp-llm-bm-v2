@@ -300,37 +300,64 @@ python run_eval.py --report-only
 ### 폴더 구조
 
 ```
-reports/
+gorilla/berkeley-function-call-leaderboard/reports/
 ├── openrouter_qwen3-14b-FC/
 │   └── openrouter_qwen3-14b-FC_eval_report.xlsx
 ├── openrouter_llama-3.3-70b-instruct-FC/
 │   └── openrouter_llama-3.3-70b-instruct-FC_eval_report.xlsx
 └── summary/
-    └── all_models_summary.xlsx  ← 전체 취합
+    └── all_models_summary.xlsx  ← 전체 취합(모델 비교)
 ```
 
-### 개별 보고서 시트
+### 보고서 재생성(평가 재실행 없이)
 
-#### Sheet 1: Evaluation Criteria
-- 평가 개요 및 방식 설명
-- Pass/Fail 조건
-- 에러 유형 설명
+이미 생성된 `result/`, `score/`를 그대로 두고 엑셀만 다시 만들고 싶다면:
 
-#### Sheet 2: Summary
+```bash
+cd gorilla/berkeley-function-call-leaderboard
+python regenerate_all_reports.py
+```
+
+또는 CLI에서:
+
+```bash
+cd gorilla/berkeley-function-call-leaderboard
+python run_eval.py --report-only
+```
+
+### 개별 보고서(모델별) 시트
+
+#### `요약`
+- 핵심 지표(Overall/Weighted Accuracy, Total, Failures)
 - 카테고리별 정확도
-- BFCL 공식 점수 형식
-- Overall Accuracy (비가중 평균)
+- 주요 실패 원인(상위 5)
+- **수치는 `상세` 시트 기반 엑셀 수식으로 계산**
 
-#### Sheet 3: Detail
+#### `상세` (PASS/FAIL 모두 포함)
 | 컬럼 | 설명 |
 |------|------|
-| Result | PASS / FAIL |
-| Category | 테스트 카테고리 |
-| Request | 실제 질문 내용 |
-| Expected (GT) | Ground Truth |
-| Actual (Model) | 모델 응답 |
+| 결과 | PASS / FAIL |
+| 카테고리 | 테스트 카테고리 |
+| ID | 테스트 케이스 ID |
+| 질문 | 실제 요청(Request) |
+| 정답(GT) | Ground Truth |
+| 모델 응답 | 모델 응답(Actual) |
 | Error Type | 에러 유형 |
-| 실패 원인 (한국어) | 한국어 에러 설명 |
+| 원인(요약) | 한국어 요약(에러 타입 기반) |
+| 오류 상세(원문) | score 파일의 error 원문 |
+| 파라미터 | (가능한 경우) 관련 파라미터명 |
+| 기대 타입 / 실제 타입 / 실제 값 | (가능한 경우) 타입/값 관련 힌트 |
+
+### 통합 보고서(전체 모델 비교) 시트
+
+#### `요약`
+- 모델별 핵심 지표 비교(엑셀 수식 기반)
+
+#### `카테고리 매트릭스`
+- 카테고리별 모델 정확도 비교
+
+#### `상세` (PASS/FAIL 모두 포함)
+- 개별 `상세`와 동일한 형태 + `모델` 컬럼이 추가됩니다.
 
 ---
 
