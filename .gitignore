@@ -1,6 +1,7 @@
-# Environment variables (contains API keys)
+# 환경 설정
 .env
-.env.*
+.env.local
+.env.*.local
 
 # Python
 __pycache__/
@@ -24,11 +25,14 @@ wheels/
 .installed.cfg
 *.egg
 
-# Virtual environments
-venv/
-ENV/
-env/
-.venv/
+# 테스트 결과 (실행마다 생성됨)
+gorilla/berkeley-function-call-leaderboard/result/
+gorilla/berkeley-function-call-leaderboard/score/
+gorilla/berkeley-function-call-leaderboard/reports/
+
+# 엑셀 임시 파일
+~$*.xlsx
+*.xlsx~
 
 # IDE
 .idea/
@@ -46,18 +50,6 @@ env/
 ehthumbs.db
 Thumbs.db
 
-# Project specific
-.python-version
-*.xlsx
-
-# BFCL evaluation outputs (regeneratable)
-gorilla/berkeley-function-call-leaderboard/result/
-gorilla/berkeley-function-call-leaderboard/score/
-gorilla/berkeley-function-call-leaderboard/.file_locks/
-gorilla/berkeley-function-call-leaderboard/__pycache__/
-gorilla/berkeley-function-call-leaderboard/test_case_ids_to_generate.json
-gorilla/berkeley-function-call-leaderboard/test_ids.json
-
-# Logs
+# 기타
 *.log
-logs/
+.file_locks/

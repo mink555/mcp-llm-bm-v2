@@ -35,6 +35,67 @@ THIN_BORDER = Border(
     bottom=Side(style="thin"),
 )
 
+# 에러 타입 → 한국어 설명 매핑
+ERROR_TYPE_DESCRIPTIONS = {
+    # AST 파싱 관련
+    "ast_decoder:decoder_failed": "응답 파싱 실패 - 모델 응답을 함수 호출 형태로 변환할 수 없음",
+    
+    # 함수명 관련
+    "simple_function_checker:wrong_func_name": "함수명 오류 - 호출한 함수명이 Ground Truth와 다름",
+    "simple_function_checker:wrong_number_of_functions": "함수 개수 오류 - 호출한 함수 개수가 예상과 다름",
+    
+    # 파라미터 관련
+    "simple_function_checker:missing_required": "필수 파라미터 누락 - required 파라미터가 포함되지 않음",
+    "simple_function_checker:unexpected_param": "불필요한 파라미터 - 정의되지 않은 파라미터가 포함됨",
+    "simple_function_checker:wrong_param_name": "파라미터명 오류 - 파라미터명이 예상과 다름",
+    
+    # 타입 관련
+    "type_error:simple": "타입 오류 - 파라미터 타입이 예상과 다름 (예: 정수를 문자열로 반환)",
+    "type_error:dict": "딕셔너리 타입 오류 - 딕셔너리 파라미터의 구조가 잘못됨",
+    "type_error:list": "리스트 타입 오류 - 리스트 파라미터의 타입이 잘못됨",
+    "type_error:tuple": "튜플 타입 오류 - 튜플 파라미터의 타입이 잘못됨",
+    
+    # 값 관련
+    "value_error:string": "문자열 값 오류 - 문자열 값이 예상 범위에 없음",
+    "value_error:integer": "정수 값 오류 - 정수 값이 예상 범위에 없음",
+    "value_error:float": "실수 값 오류 - 실수 값이 예상 범위에 없음",
+    "value_error:boolean": "불리언 값 오류 - True/False 값이 예상과 다름",
+    "value_error:dict": "딕셔너리 값 오류 - 딕셔너리 값이 예상과 다름",
+    "value_error:list": "리스트 값 오류 - 리스트 값이 예상과 다름",
+    "value_error:enum": "열거형 값 오류 - 허용된 값 목록에 없음",
+    
+    # 병렬 함수 호출 관련
+    "parallel_function_checker_no_order:wrong_count": "병렬 호출 개수 오류 - 호출한 함수 개수가 예상과 다름",
+    "parallel_function_checker_no_order:cannot_find_match": "병렬 호출 매칭 실패 - 기대하는 함수 호출을 찾을 수 없음 (함수명/파라미터 불일치)",
+    "parallel_function_checker_enforce_order:wrong_count": "병렬 호출 개수 오류 (순서 검사) - 호출한 함수 개수가 예상과 다름",
+    
+    # 다중 함수 호출 관련
+    "multiple_function_checker:wrong_count": "다중 호출 개수 오류 - 호출한 함수 개수가 예상과 다름",
+    
+    # 기타
+    "no_function_call": "함수 호출 없음 - 모델이 함수를 호출하지 않음",
+    "irrelevance:no_function_call": "정상 (함수 호출 안 함) - 불필요한 함수 호출을 올바르게 거부함",
+    "relevance:no_function_call": "함수 호출 누락 - 필요한 함수를 호출하지 않음",
+}
+
+def get_error_description_kr(error_type: str) -> str:
+    """에러 타입에 대한 한국어 설명 반환"""
+    if not error_type:
+        return ""
+    
+    # 정확히 일치하는 경우
+    if error_type in ERROR_TYPE_DESCRIPTIONS:
+        return ERROR_TYPE_DESCRIPTIONS[error_type]
+    
+    # 부분 일치 검색 (예: "type_error:simple" -> "type_error")
+    for key, desc in ERROR_TYPE_DESCRIPTIONS.items():
+        if error_type.startswith(key.split(":")[0] + ":"):
+            return desc
+    
+    # 기본값
+    return f"기타 오류 - {error_type}"
+
+
 # BFCL 카테고리 그룹 매핑
 CATEGORY_GROUPS = {
     "simple_python": ("Non-Live", "Simple"),
@@ -465,8 +526,8 @@ class BFCLExcelReporter:
         """Sheet 3: 상세 결과 (GT, 모델 응답, Pass 여부) - Summary보다 먼저 생성"""
         ws = self.wb.create_sheet("Detail")
         
-        # 헤더 - Request (실제 질문) 컬럼 추가
-        headers = ["#", "Result", "Category", "Type", "Query", "Request", "Expected (GT)", "Actual (Model)", "Error Type"]
+        # 헤더 - Request (실제 질문) 컬럼 및 한국어 설명 컬럼 추가
+        headers = ["#", "Result", "Category", "Type", "Query", "Request", "Expected (GT)", "Actual (Model)", "Error Type", "실패 원인 (한국어)"]
         for col, header in enumerate(headers, 1):
             cell = ws.cell(row=1, column=col, value=header)
             cell.fill = HEADER_FILL
@@ -495,6 +556,14 @@ class BFCLExcelReporter:
             ws.cell(row=row, column=8, value=entry["actual"]).border = THIN_BORDER
             ws.cell(row=row, column=9, value=entry.get("error_type", "")).border = THIN_BORDER
             
+            # 한국어 실패 원인 설명
+            error_type = entry.get("error_type", "")
+            error_desc_kr = get_error_description_kr(error_type) if error_type else ""
+            error_desc_cell = ws.cell(row=row, column=10, value=error_desc_kr)
+            error_desc_cell.border = THIN_BORDER
+            if error_type:
+                error_desc_cell.fill = FAIL_FILL  # 실패한 경우 빨간 배경
+            
             row += 1
         
         # 열 너비 조정
@@ -507,6 +576,7 @@ class BFCLExcelReporter:
         ws.column_dimensions["G"].width = 45  # Expected (GT)
         ws.column_dimensions["H"].width = 50  # Actual (Model)
         ws.column_dimensions["I"].width = 25  # Error Type
+        ws.column_dimensions["J"].width = 50  # 실패 원인 (한국어)
 
     def create_summary_sheet(self) -> None:
         """Sheet 2: 요약 (BFCL 공식 Score 형식 - Detail 시트 연동)"""

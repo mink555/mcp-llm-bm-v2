@@ -62,6 +62,18 @@ class OpenRouterHandler(BaseHandler):
                 "X-Title": os.getenv("OPENROUTER_TITLE", "BFCL Evaluation"),
             }
         )
+        
+        # Function name mapping: converted_name -> original_name
+        # This is populated in _compile_tools and used in decode_ast
+        self._func_name_mapping: dict[str, str] = {}
+        
+        # Check if this model uses underscore_to_dot (from model config)
+        # If True: evaluation expects converted names (math_factorial)
+        # If False: evaluation expects original names (math.factorial)
+        from bfcl_eval.constants.model_config import MODEL_CONFIG_MAPPING
+        model_key = registry_name.replace("_", "/")
+        config = MODEL_CONFIG_MAPPING.get(model_key)
+        self._underscore_to_dot = config.underscore_to_dot if config else False
 
     def _parse_mistral_tool_calls_text(self, text: str) -> list[dict]:
         """
@@ -146,72 +158,66 @@ class OpenRouterHandler(BaseHandler):
         # Pattern 4: Fall back to default prompting decoder
         raise ValueError(f"Could not parse tool calls from text: {text}")
 
-    def _convert_param_types(self, params: dict) -> dict:
-        """
-        Convert string values to appropriate types.
-        Llama models often return numbers as strings (e.g., "10" instead of 10).
-        """
-        converted = {}
-        for key, value in params.items():
-            if isinstance(value, str):
-                # Try to convert to int
-                try:
-                    converted[key] = int(value)
-                    continue
-                except ValueError:
-                    pass
-                # Try to convert to float
-                try:
-                    converted[key] = float(value)
-                    continue
-                except ValueError:
-                    pass
-                # Try to convert to boolean
-                if value.lower() == "true":
-                    converted[key] = True
-                    continue
-                elif value.lower() == "false":
-                    converted[key] = False
-                    continue
-                # Keep as string
-                converted[key] = value
-            elif isinstance(value, dict):
-                # Recursively convert nested dicts
-                converted[key] = self._convert_param_types(value)
-            elif isinstance(value, list):
-                # Convert list elements
-                converted[key] = [
-                    self._convert_param_types(v) if isinstance(v, dict) 
-                    else (int(v) if isinstance(v, str) and v.isdigit() else v)
-                    for v in value
-                ]
-            else:
-                converted[key] = value
-        return converted
-
     def _restore_function_name(self, name: str) -> str:
         """
         Restore function names that were converted by OpenAI API.
-        OpenAI API converts '.' to '_' in function names.
-        Known module patterns: math_, algebra_, datetime_, os_, sys_, etc.
+        Uses the mapping built in _compile_tools for accurate restoration.
+        
+        IMPORTANT: Only restore if underscore_to_dot=False for this model.
+        If underscore_to_dot=True, evaluation expects converted names (e.g., math_factorial)
+        
+        Example: math_factorial -> math.factorial (only if underscore_to_dot=False)
         """
-        # Known module/object prefixes that should have '.' instead of '_'
-        known_modules = [
-            'math_', 'algebra_', 'datetime_', 'os_', 'sys_', 'json_', 
-            're_', 'collections_', 'itertools_', 'functools_', 'operator_',
-            'string_', 'random_', 'statistics_', 'decimal_', 'fractions_',
-            'numpy_', 'pandas_', 'scipy_', 'sklearn_', 'torch_', 'tf_',
-            # Common API/service prefixes
-            'spotify_', 'weather_', 'calendar_', 'email_', 'file_',
-            'database_', 'api_', 'http_', 'web_', 'user_', 'auth_',
-        ]
+        # If model uses underscore_to_dot=True, don't restore (keep math_factorial)
+        # This is because the evaluation checker expects the converted name
+        if self._underscore_to_dot:
+            return name
         
-        for module in known_modules:
-            if name.startswith(module):
-                # Replace only the first underscore with a dot
-                return name.replace(module, module[:-1] + '.', 1)
+        # Use the mapping if available (most accurate)
+        if name in self._func_name_mapping:
+            return self._func_name_mapping[name]
         
+        # Fallback: return as-is if no mapping found
         return name
+
+    def _parse_and_restore_text_response(self, content):
+        """
+        Parse text response and restore function names.
+        Used when model returns text instead of tool_calls.
+        """
+        if content is None:
+            return content
+            
+        # Try to parse as JSON array of function calls
+        try:
+            parsed = json.loads(content) if isinstance(content, str) else content
+            if isinstance(parsed, list):
+                result = []
+                for item in parsed:
+                    if isinstance(item, str):
+                        item = json.loads(item)
+                    if isinstance(item, dict):
+                        # Format: {"type": "function", "name": "...", "parameters": {...}}
+                        if "name" in item and "parameters" in item:
+                            func_name = self._restore_function_name(item["name"])
+                            args = item["parameters"]
+                            if isinstance(args, dict):
+                                args = json.dumps(args)
+                            result.append({func_name: args})
+                        # Format: {func_name: args}
+                        elif len(item) == 1:
+                            name = list(item.keys())[0]
+                            func_name = self._restore_function_name(name)
+                            args = item[name]
+                            if isinstance(args, dict):
+                                args = json.dumps(args)
+                            result.append({func_name: args})
+                return result if result else content
+        except (json.JSONDecodeError, TypeError):
+            pass
+        
+        # Return as-is if parsing fails
+        return content
 
     def decode_ast(self, result, language, has_tool_call_tag):
         if self.is_fc_model:
@@ -227,11 +233,40 @@ class OpenRouterHandler(BaseHandler):
                             params = json.loads(params)
                         # Restore function name (e.g., math_factorial -> math.factorial)
                         name = self._restore_function_name(name)
-                        # Convert parameter types (e.g., "10" -> 10)
-                        params = self._convert_param_types(params)
+                        # NOTE: No type conversion - model's type handling is part of BFCL evaluation
                         decoded_output.append({name: params})
+                    elif isinstance(invoked_function, str):
+                        # Handle string items in list (Llama parallel format)
+                        # e.g., ['{"type": "function", "name": "func", "parameters": {...}}', ...]
+                        try:
+                            parsed_item = json.loads(invoked_function)
+                            if isinstance(parsed_item, dict):
+                                # Format: {"type": "function", "name": "...", "parameters": {...}}
+                                if "name" in parsed_item and "parameters" in parsed_item:
+                                    name = parsed_item["name"]
+                                    params = parsed_item["parameters"]
+                                    if isinstance(params, str):
+                                        params = json.loads(params)
+                                    name = self._restore_function_name(name)
+                                    decoded_output.append({name: params})
+                                else:
+                                    # Already in {func_name: params} format
+                                    name = list(parsed_item.keys())[0]
+                                    params = parsed_item[name]
+                                    if isinstance(params, str):
+                                        params = json.loads(params)
+                                    name = self._restore_function_name(name)
+                                    decoded_output.append({name: params})
+                        except json.JSONDecodeError:
+                            # Try parsing as text-based tool call
+                            parsed = self._parse_mistral_tool_calls_text(invoked_function)
+                            for item in parsed:
+                                name = list(item.keys())[0]
+                                params = item[name]
+                                name = self._restore_function_name(name)
+                                decoded_output.append({name: params})
                     else:
-                        raise ValueError(f"Expected dict, got {type(invoked_function)}: {invoked_function}")
+                        raise ValueError(f"Expected dict or str, got {type(invoked_function)}: {invoked_function}")
                 return decoded_output
             
             # If result is a string (model returned text instead of tool_calls)
@@ -239,13 +274,12 @@ class OpenRouterHandler(BaseHandler):
             elif isinstance(result, str):
                 # Try parsing Mistral's text-based tool call format
                 parsed = self._parse_mistral_tool_calls_text(result)
-                # Apply function name restoration and type conversion
+                # Apply function name restoration only (no type conversion)
                 decoded_output = []
                 for item in parsed:
                     name = list(item.keys())[0]
                     params = item[name]
                     name = self._restore_function_name(name)
-                    params = self._convert_param_types(params)
                     decoded_output.append({name: params})
                 return decoded_output
             
@@ -296,6 +330,15 @@ class OpenRouterHandler(BaseHandler):
 
     def _compile_tools(self, inference_data: dict, test_entry: dict) -> dict:
         functions: list = test_entry["function"]
+        
+        # Build function name mapping before conversion
+        # This maps converted names (with _) back to original names (with .)
+        self._func_name_mapping = {}
+        for func in functions:
+            original_name = func["name"]
+            if "." in original_name:
+                converted_name = original_name.replace(".", "_")
+                self._func_name_mapping[converted_name] = original_name
 
         tools = convert_to_tool(functions, GORILLA_TO_OPENAPI, self.model_style)
 
@@ -314,13 +357,18 @@ class OpenRouterHandler(BaseHandler):
                     args = func_call.function.arguments
                     if isinstance(args, dict):
                         args = json.dumps(args)
-                    model_responses.append({func_call.function.name: args})
+                    # Restore function name at save time (e.g., math_factorial -> math.factorial)
+                    func_name = self._restore_function_name(func_call.function.name)
+                    model_responses.append({func_name: args})
                     tool_call_ids.append(func_call.id)
             else:
-                model_responses = api_response.choices[0].message.content
+                # Model returned text instead of tool_calls - try to parse and restore
+                content = api_response.choices[0].message.content
+                model_responses = self._parse_and_restore_text_response(content)
                 tool_call_ids = []
         except Exception:
-            model_responses = api_response.choices[0].message.content
+            content = api_response.choices[0].message.content
+            model_responses = self._parse_and_restore_text_response(content)
             tool_call_ids = []
 
         model_responses_message_for_chat_history = api_response.choices[0].message
