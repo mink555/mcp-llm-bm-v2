@@ -113,22 +113,10 @@ def evaluate_results(models: list, categories: list) -> bool:
 
 def generate_reports(models: list):
     """엑셀 보고서 생성"""
-    from excel_reporter import BFCLExcelReporter
-    from openpyxl import Workbook
-    from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+    from excel_reporter import generate_excel_report, generate_all_models_summary
     
     reports_dir = Path("reports")
     reports_dir.mkdir(exist_ok=True)
-    
-    # 스타일 정의
-    HEADER_FILL = PatternFill(start_color="D9E2EC", end_color="D9E2EC", fill_type="solid")
-    HEADER_FONT = Font(bold=True, size=11)
-    THIN_BORDER = Border(
-        left=Side(style="thin"), right=Side(style="thin"),
-        top=Side(style="thin"), bottom=Side(style="thin"),
-    )
-    PASS_FILL = PatternFill(start_color="D1FAE5", end_color="D1FAE5", fill_type="solid")
-    FAIL_FILL = PatternFill(start_color="FEE2E2", end_color="FEE2E2", fill_type="solid")
     
     print(f"\n{'='*60}")
     print("📊 엑셀 보고서 생성")
@@ -136,7 +124,6 @@ def generate_reports(models: list):
     
     # 모델별 보고서 생성
     model_reports = []
-    all_results = {}  # 전체 취합용
     
     for model in models:
         safe_name = model.replace("/", "_")
@@ -152,91 +139,30 @@ def generate_reports(models: list):
         model_report_dir.mkdir(exist_ok=True)
         
         # 보고서 생성
-        reporter = BFCLExcelReporter(
-            model_name=model,
-            result_dir=result_dir,
-            score_dir=score_dir,
-        )
-        reporter.load_data()
-        reporter.create_evaluation_criteria_sheet()
-        reporter.create_detail_sheet()
-        reporter.create_summary_sheet()
-        
-        report_path = model_report_dir / f"{safe_name}_eval_report.xlsx"
-        reporter.wb.save(report_path)
-        
-        print(f"✅ {model}: {report_path}")
-        model_reports.append(report_path)
-        
-        # 취합용 데이터 수집
-        all_results[model] = {
-            "categories": reporter.categories_found,
-            "detail_data": reporter.detail_data,
-        }
+        try:
+            report_path = generate_excel_report(
+                model_name=model,
+                result_dir=str(result_dir),
+                score_dir=str(score_dir)
+            )
+            
+            # 생성된 파일을 모델 폴더로 이동
+            report_file = Path(report_path)
+            target_path = model_report_dir / f"{safe_name}_eval_report.xlsx"
+            if report_file.exists():
+                shutil.move(str(report_file), str(target_path))
+                print(f"✅ {model}: {target_path}")
+                model_reports.append(target_path)
+        except Exception as e:
+            print(f"❌ 보고서 생성 실패 ({model}): {e}")
     
     # 전체 취합 보고서 생성
-    if len(all_results) > 1:
-        summary_dir = reports_dir / "summary"
-        summary_dir.mkdir(exist_ok=True)
-        
-        wb = Workbook()
-        ws = wb.active
-        ws.title = "Model Comparison"
-        
-        # 헤더
-        headers = ["Model", "Category", "Total", "Correct", "Incorrect", "Accuracy"]
-        for col, header in enumerate(headers, 1):
-            cell = ws.cell(row=1, column=col, value=header)
-            cell.fill = HEADER_FILL
-            cell.font = HEADER_FONT
-            cell.alignment = Alignment(horizontal="center")
-            cell.border = THIN_BORDER
-        
-        row = 2
-        for model, data in all_results.items():
-            # 카테고리별 통계 계산
-            category_stats = {}
-            for entry in data["detail_data"]:
-                cat = entry["category"]
-                if cat not in category_stats:
-                    category_stats[cat] = {"total": 0, "correct": 0}
-                category_stats[cat]["total"] += 1
-                if entry["result"] == "PASS":
-                    category_stats[cat]["correct"] += 1
-            
-            for cat, stats in sorted(category_stats.items()):
-                total = stats["total"]
-                correct = stats["correct"]
-                incorrect = total - correct
-                accuracy = correct / total if total > 0 else 0
-                
-                ws.cell(row=row, column=1, value=model).border = THIN_BORDER
-                ws.cell(row=row, column=2, value=cat).border = THIN_BORDER
-                ws.cell(row=row, column=3, value=total).border = THIN_BORDER
-                ws.cell(row=row, column=4, value=correct).border = THIN_BORDER
-                ws.cell(row=row, column=5, value=incorrect).border = THIN_BORDER
-                
-                acc_cell = ws.cell(row=row, column=6, value=accuracy)
-                acc_cell.number_format = "0.00%"
-                acc_cell.border = THIN_BORDER
-                if accuracy >= 0.8:
-                    acc_cell.fill = PASS_FILL
-                elif accuracy < 0.5:
-                    acc_cell.fill = FAIL_FILL
-                
-                row += 1
-        
-        # 열 너비 조정
-        ws.column_dimensions["A"].width = 45
-        ws.column_dimensions["B"].width = 20
-        ws.column_dimensions["C"].width = 10
-        ws.column_dimensions["D"].width = 10
-        ws.column_dimensions["E"].width = 10
-        ws.column_dimensions["F"].width = 12
-        
-        summary_path = summary_dir / "all_models_summary.xlsx"
-        wb.save(summary_path)
-        print(f"✅ 전체 취합: {summary_path}")
+    if len(model_reports) > 1:
+        try:
+            summary_path = generate_all_models_summary(str(reports_dir))
+            print(f"✅ 전체 취합: {summary_path}")
+        except Exception as e:
+            print(f"⚠️  취합 보고서 생성 실패: {e}")
     
     return model_reports
 
