@@ -1761,12 +1761,14 @@ class AllModelsSummaryReporter:
             # 모델명
             ws.cell(row=r, column=2, value=short)
 
-            # Overall (BFCL) = 카테고리 매트릭스 시트의 해당 모델 Overall 참조
-            # 카테고리 매트릭스의 Overall 행은 동적이므로, 여기서는 Weighted와 동일하게 상세 기반 계산
-            # (정확한 BFCL Overall은 카테고리별 평균이지만, 단순화를 위해 전체 PASS율로 대체)
-            # NOTE: 정확한 Overall은 '카테고리 매트릭스' 시트 참조가 필요하지만, 시트 생성 순서상 복잡
-            # → Weighted와 동일하게 전체 정확도로 표시 (BFCL 공식과 약간 다름)
-            overall_formula = f'=IFERROR(COUNTIFS({detail_model},B{r},{detail_result},"PASS")/COUNTIF({detail_model},B{r}),0)'
+            # Overall (BFCL) = 카테고리 매트릭스 시트의 Overall 행에서 해당 모델 값 참조
+            # INDEX/MATCH: "Overall Accuracy" 행 찾고, 모델명으로 컬럼 찾기
+            matrix_sheet = "'카테고리 매트릭스'"
+            overall_formula = (
+                f'=IFERROR(INDEX({matrix_sheet}!A:Z,'
+                f'MATCH("Overall Accuracy",{matrix_sheet}!A:A,0),'
+                f'MATCH(B{r},{matrix_sheet}!6:6,0)),0)'
+            )
             ws.cell(row=r, column=3, value=overall_formula)
 
             # Weighted = PASS / Total (상세 시트 기반 수식)
