@@ -230,11 +230,13 @@ pip install openpyxl  # 엑셀 보고서 생성용
 
 ### 3. 환경 변수 설정
 
-프로젝트 루트에 `.env` 파일 생성:
+`gorilla/berkeley-function-call-leaderboard/` 디렉토리에 `.env` 파일 생성 (gitignore 처리됨):
 
 ```env
 OPENROUTER_API_KEY=your_api_key_here
 ```
+
+> 주의: `.env`는 절대 커밋하지 않습니다. (이 저장소는 `.gitignore`로 차단)
 
 ---
 
@@ -277,6 +279,10 @@ python run_eval.py --full
 | `--full` | 전체 테스트 |
 | `--models "모델1,모델2"` | 특정 모델만 테스트 |
 | `--categories "cat1,cat2"` | 특정 카테고리만 테스트 |
+| `--num-threads N` | 생성 단계 동시성(threads). OpenRouter 속도/레이트리밋에 맞춰 조절 |
+| `--append` | 기존 `result/score`를 삭제하지 않고 누적 실행 |
+| `--sample-size N` | 카테고리별 N개만 샘플로 실행(동일 ID로 모델 간 비교). `--append`와 함께 사용 권장 |
+| `--sample-seed N` | 샘플링 시드(재현성) |
 | `--report-only` | 보고서만 재생성 (기존 결과 유지) |
 | `--skip-generate` | 생성 단계 건너뛰기 |
 | `--skip-evaluate` | 평가 단계 건너뛰기 |
@@ -288,6 +294,12 @@ python run_eval.py --full
 python run_eval.py --quick \
     --models "openrouter/qwen3-14b-FC,openrouter/qwen3-32b-FC" \
     --categories "simple_python"
+
+# parallel_multiple를 각 모델별 100개만 샘플로 추가 실행(누적)
+python run_eval.py --append \
+    --categories "parallel_multiple" \
+    --sample-size 100 \
+    --num-threads 4
 
 # 기존 결과로 보고서만 재생성
 python run_eval.py --report-only
@@ -358,6 +370,11 @@ python run_eval.py --report-only
 
 #### `상세` (PASS/FAIL 모두 포함)
 - 개별 `상세`와 동일한 형태 + `모델` 컬럼이 추가됩니다.
+
+### 이번 실행 기준(참고)
+- Non-Live 전체(완주): `simple_python(400)`, `multiple(200)`, `parallel(200)`  × 모델 5개
+- 추가 샘플: `parallel_multiple`은 **모델별 100개 샘플**로 실행
+- 따라서 통합 `상세` 행 수는 \( (400+200+200)\times 5 + 100\times 5 = 4500 \) 입니다.
 
 ---
 
