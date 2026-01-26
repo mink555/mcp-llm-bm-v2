@@ -51,6 +51,46 @@ QUICK_TEST_IDS = {
 # 전체 카테고리
 ALL_CATEGORIES = ["simple_python", "multiple", "parallel"]
 
+def _write_sample_id_file(categories: list[str], sample_size: int, seed: int = 0) -> str:
+    """
+    bfcl_eval generate의 --run-ids 모드용 파일을 임시로 작성.
+    - 카테고리별로 동일한 ID 집합을 모든 모델에 적용 (모델 비교 가능)
+    - 기존 파일은 .bak 으로 백업 후, 작업 종료 시 복구 필요
+    """
+    from bfcl_eval.utils import load_dataset_entry
+    import random
+
+    rng = random.Random(seed)
+    sample_map: dict[str, list[str]] = {}
+
+    for cat in categories:
+        entries = load_dataset_entry(cat)
+        ids = [e["id"] for e in entries if "id" in e]
+        # 안정적인 순서를 위해 정렬 후 샘플링
+        ids = sorted(ids)
+        if sample_size >= len(ids):
+            picked = ids
+        else:
+            # 재현 가능하게 랜덤 샘플
+            picked = rng.sample(ids, sample_size)
+            picked = sorted(picked)
+        sample_map[cat] = picked
+
+    test_ids_file = Path("test_case_ids_to_generate.json")
+    bak_path = test_ids_file.with_suffix(".json.bak")
+    if test_ids_file.exists():
+        bak_path.write_text(test_ids_file.read_text())
+    test_ids_file.write_text(json.dumps(sample_map, indent=2))
+    return str(bak_path)
+
+
+def _restore_id_file(bak_path: str) -> None:
+    test_ids_file = Path("test_case_ids_to_generate.json")
+    bak = Path(bak_path)
+    if bak.exists():
+        test_ids_file.write_text(bak.read_text())
+        bak.unlink()
+
 
 def run_command(cmd: list, description: str = "") -> bool:
     """명령 실행"""
@@ -86,7 +126,7 @@ def setup_quick_test():
 def generate_results(model: str, categories: list, is_quick: bool) -> bool:
     """모델 응답 생성"""
     cmd = [
-        "python", "-m", "bfcl_eval", "generate",
+        sys.executable, "-m", "bfcl_eval", "generate",
         "--model", model,
         "--test-category", ",".join(categories),
         "--temperature", "0",
@@ -102,7 +142,7 @@ def generate_results(model: str, categories: list, is_quick: bool) -> bool:
 def evaluate_results(models: list, categories: list) -> bool:
     """평가 실행"""
     cmd = [
-        "python", "-m", "bfcl_eval", "evaluate",
+        sys.executable, "-m", "bfcl_eval", "evaluate",
         "--model", ",".join(models),
         "--test-category", ",".join(categories),
         "--partial-eval",
@@ -203,15 +243,21 @@ def main():
     parser.add_argument("--full", action="store_true", help="전체 테스트")
     parser.add_argument("--models", type=str, help="테스트할 모델 (쉼표 구분)")
     parser.add_argument("--categories", type=str, help="테스트할 카테고리 (쉼표 구분)")
+    parser.add_argument("--sample-size", type=int, default=0, help="카테고리별 샘플 개수(0이면 전체). --run-ids로 실행")
+    parser.add_argument("--sample-seed", type=int, default=0, help="샘플링 시드(재현성)")
+    parser.add_argument("--num-threads", type=int, default=1, help="생성 단계 동시성(threads)")
+    parser.add_argument("--append", action="store_true", help="기존 result/score를 삭제하지 않고 누적 실행")
     parser.add_argument("--skip-generate", action="store_true", help="생성 단계 건너뛰기")
     parser.add_argument("--skip-evaluate", action="store_true", help="평가 단계 건너뛰기")
     parser.add_argument("--report-only", action="store_true", help="보고서만 생성")
     
     args = parser.parse_args()
     
-    # 기본값: 퀵 테스트
+    # 기본값:
+    # - 카테고리 지정이 없으면 quick
+    # - 카테고리를 지정하면 전체(또는 sample-size) 실행
     if not args.quick and not args.full:
-        args.quick = True
+        args.quick = (args.categories is None and args.sample_size == 0)
     
     # 모델 목록
     if args.models:
@@ -236,7 +282,7 @@ def main():
 """)
     
     # 1. 정리
-    if not args.report_only and not args.skip_generate:
+    if not args.report_only and not args.skip_generate and not args.append:
         clean_directories()
         
         if args.quick:
@@ -244,9 +290,34 @@ def main():
     
     # 2. 생성
     if not args.report_only and not args.skip_generate:
-        for model in models:
-            if not generate_results(model, categories, args.quick):
-                print(f"❌ 생성 실패: {model}")
+        # sample-size 모드면, run-ids 파일을 임시로 교체해서 해당 ID만 생성
+        bak_path = ""
+        try:
+            if args.sample_size and args.sample_size > 0:
+                bak_path = _write_sample_id_file(categories, args.sample_size, seed=args.sample_seed)
+                is_run_ids = True
+            else:
+                is_run_ids = args.quick
+
+            # num-threads 반영
+            def _generate(model: str) -> bool:
+                cmd = [
+                    sys.executable, "-m", "bfcl_eval", "generate",
+                    "--model", model,
+                    "--test-category", ",".join(categories),
+                    "--temperature", "0",
+                    "--num-threads", str(args.num_threads),
+                ]
+                if is_run_ids:
+                    cmd.append("--run-ids")
+                return run_command(cmd, f"응답 생성: {model}")
+
+            for model in models:
+                if not _generate(model):
+                    print(f"❌ 생성 실패: {model}")
+        finally:
+            if bak_path:
+                _restore_id_file(bak_path)
     
     # 3. 평가
     if not args.report_only and not args.skip_evaluate:
