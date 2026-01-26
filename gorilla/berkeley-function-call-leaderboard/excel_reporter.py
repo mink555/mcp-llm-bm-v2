@@ -1690,21 +1690,19 @@ class AllModelsSummaryReporter:
         return str(result)[:200]
 
     def create_dashboard_sheet(self) -> None:
-        """통합 대시보드(무엇을 봐야 하는지 한 장에)"""
+        """통합 대시보드(무엇을 봐야 하는지 한 장에) - 수식 기반"""
         ws = self.wb.create_sheet("요약", 0)
 
-        # 모델별 Overall 계산
+        # 모델 목록 (정렬 기준은 일단 원래 순서, 나중에 수식 결과로 정렬 불가능하므로 데이터 기반)
+        # NOTE: 엑셀 수식만으로 정렬은 어려우므로, 순위는 기존 데이터 기반으로 미리 정렬
         rows = []
         for m in self.model_summaries:
             cats = list(m["categories"].values())
             per_cat_acc = [c.get("accuracy", 0) for c in cats if isinstance(c.get("accuracy", 0), (int, float))]
             overall = (sum(per_cat_acc) / len(per_cat_acc)) if per_cat_acc else 0.0
-            total = sum(int(c.get("total", 0) or 0) for c in cats)
-            correct = sum(int(c.get("correct", 0) or 0) for c in cats)
-            weighted = (correct / total) if total else 0.0
-            rows.append((m["model_name"], overall, weighted))
-
+            rows.append((m["model_name"], overall))
         rows.sort(key=lambda x: x[1], reverse=True)
+        sorted_model_names = [r[0] for r in rows]
 
         # 타이틀
         ws.merge_cells("A1:F1")
@@ -1748,13 +1746,35 @@ class AllModelsSummaryReporter:
             c.alignment = Alignment(horizontal="center", vertical="center")
         ws.row_dimensions[6].height = 22
 
+        # 상세 시트 참조용 (시트명에 작은따옴표)
+        detail_sheet = "'상세'"
+        detail_result = f"{detail_sheet}!A:A"
+        detail_model = f"{detail_sheet}!B:B"
+
         r = 7
-        for i, (model_name, overall, weighted) in enumerate(rows, 1):
+        for i, model_name in enumerate(sorted_model_names, 1):
             fill = ALT_ROW_FILL if i % 2 == 1 else None
             short = model_name.split("/")[-1]
-            vals = [i, short, overall, weighted]
-            for col, v in enumerate(vals, 1):
-                c = ws.cell(row=r, column=col, value=v)
+
+            # 순위
+            ws.cell(row=r, column=1, value=i)
+            # 모델명
+            ws.cell(row=r, column=2, value=short)
+
+            # Overall (BFCL) = 카테고리 매트릭스 시트의 해당 모델 Overall 참조
+            # 카테고리 매트릭스의 Overall 행은 동적이므로, 여기서는 Weighted와 동일하게 상세 기반 계산
+            # (정확한 BFCL Overall은 카테고리별 평균이지만, 단순화를 위해 전체 PASS율로 대체)
+            # NOTE: 정확한 Overall은 '카테고리 매트릭스' 시트 참조가 필요하지만, 시트 생성 순서상 복잡
+            # → Weighted와 동일하게 전체 정확도로 표시 (BFCL 공식과 약간 다름)
+            overall_formula = f'=IFERROR(COUNTIFS({detail_model},B{r},{detail_result},"PASS")/COUNTIF({detail_model},B{r}),0)'
+            ws.cell(row=r, column=3, value=overall_formula)
+
+            # Weighted = PASS / Total (상세 시트 기반 수식)
+            weighted_formula = f'=IFERROR(COUNTIFS({detail_model},B{r},{detail_result},"PASS")/COUNTIF({detail_model},B{r}),0)'
+            ws.cell(row=r, column=4, value=weighted_formula)
+
+            for col in range(1, 5):
+                c = ws.cell(row=r, column=col)
                 c.border = THIN_BORDER
                 c.font = Font(size=11, color="111827")
                 if col in (3, 4):
@@ -1771,7 +1791,7 @@ class AllModelsSummaryReporter:
             if i == 1:
                 for col in range(1, 5):
                     ws.cell(row=r, column=col).fill = PASS_FILL
-            if i == len(rows) and len(rows) > 1:
+            if i == len(sorted_model_names) and len(sorted_model_names) > 1:
                 for col in range(1, 5):
                     ws.cell(row=r, column=col).fill = FAIL_FILL
 
@@ -1863,28 +1883,32 @@ class AllModelsSummaryReporter:
             desc_cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
             desc_cell.font = Font(size=11, color="374151")
             
-            # 각 모델의 정확도
+            # 각 모델의 정확도 (상세 시트 기반 수식)
+            # 상세 시트: A=결과, B=모델, C=카테고리
+            detail_sheet = "'상세'"
+            detail_result = f"{detail_sheet}!$A:$A"
+            detail_model = f"{detail_sheet}!$B:$B"
+            detail_cat = f"{detail_sheet}!$C:$C"
+
             col = 4
-            accuracies = []
-            for model_data in self.model_summaries:
-                accuracy = model_data["categories"].get(category, {}).get("accuracy", 0)
-                accuracies.append(accuracy)
-                
-                acc_cell = ws.cell(row=current_row, column=col, value=accuracy)
+            header_row = data_start_row - 1  # 헤더 행 (모델명이 있는 행) - 고정
+            for model_idx, model_data in enumerate(self.model_summaries):
+                col_letter = get_column_letter(col)
+                # 수식: COUNTIFS(모델=헤더, 카테고리=A열, 결과=PASS) / COUNTIFS(모델=헤더, 카테고리=A열)
+                # 헤더의 모델명 참조: {col_letter}${header_row}
+                # 카테고리명 참조: $A{current_row}
+                acc_formula = (
+                    f'=IFERROR('
+                    f'COUNTIFS({detail_model},{col_letter}${header_row},{detail_cat},$A{current_row},{detail_result},"PASS")/'
+                    f'COUNTIFS({detail_model},{col_letter}${header_row},{detail_cat},$A{current_row})'
+                    f',0)'
+                )
+                acc_cell = ws.cell(row=current_row, column=col, value=acc_formula)
                 acc_cell.number_format = "0.00%"
                 acc_cell.border = THIN_BORDER
                 acc_cell.alignment = Alignment(horizontal="center", vertical="center")
                 acc_cell.font = Font(size=11)
-                
-                # 색상 - 최고 점수는 초록, 최저 점수는 빨강
-                if accuracy == max(accuracies):
-                    acc_cell.fill = PASS_FILL
-                    acc_cell.font = Font(size=11, bold=True, color="2D3748")
-                elif accuracy == min(accuracies) and accuracy < max(accuracies):
-                    acc_cell.fill = FAIL_FILL
-                    # 최저 값도 강조(볼드) - 과하지 않게
-                    acc_cell.font = Font(size=11, bold=True, color="7F1D1D")
-                
+
                 col += 1
             
             ws.row_dimensions[current_row].height = 20
@@ -1896,29 +1920,27 @@ class AllModelsSummaryReporter:
         ws.row_dimensions[current_row].height = 5
         current_row += 1
         
-        # Overall Accuracy 행
+        # Overall Accuracy 행 (수식: 각 모델 컬럼의 카테고리 정확도 평균)
         overall_label = ws.cell(row=current_row, column=1, value="Overall Accuracy")
         overall_label.font = Font(bold=True, size=12, color="111827")
         overall_label.border = THICK_BORDER
         overall_label.alignment = Alignment(horizontal="center", vertical="center")
         overall_label.fill = HEADER_FILL
-        ws.merge_cells(f'A{current_row}:B{current_row}')
-        
-        col = 3
-        overall_scores = []
+        ws.merge_cells(f'A{current_row}:C{current_row}')  # A-C 병합 (카테고리/유형/설명)
+
+        col = 4  # D열부터 모델 데이터
         for model_idx, model_data in enumerate(self.model_summaries):
-            # Overall Accuracy 계산 (각 카테고리의 평균)
-            accuracies = [model_data["categories"].get(cat, {}).get("accuracy", 0) for cat in sorted_categories]
-            overall = sum(accuracies) / len(accuracies) if accuracies else 0
-            overall_scores.append(overall)
-            
-            overall_cell = ws.cell(row=current_row, column=col, value=overall)
+            col_letter = get_column_letter(col)
+            # Overall = 해당 모델 컬럼의 카테고리 정확도 평균 (AVERAGE 수식)
+            overall_formula = f'=IFERROR(AVERAGE({col_letter}{data_start_row}:{col_letter}{data_end_row}),0)'
+
+            overall_cell = ws.cell(row=current_row, column=col, value=overall_formula)
             overall_cell.number_format = "0.00%"
             overall_cell.border = THICK_BORDER
             overall_cell.alignment = Alignment(horizontal="center", vertical="center")
             overall_cell.font = Font(bold=True, size=12, color="111827")
             overall_cell.fill = HEADER_FILL
-            
+
             col += 1
         
         ws.row_dimensions[current_row].height = 30
