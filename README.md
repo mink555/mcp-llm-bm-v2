@@ -79,23 +79,72 @@ OPENROUTER_API_KEY=your_api_key_here
 
 ---
 
-## 🚀 CLI 사용 가이드
+## 🚀 빠른 시작 (Quick Start)
 
-### 1. 실행 모드 (Basic)
-| 명령 | 설명 | 비고 |
-| :--- | :--- | :--- |
-| `python run_eval.py --quick` | 퀵 테스트 (카테고리별 2개) | 빠른 로직 검증용 |
-| `python run_eval.py --full` | 전체 테스트 수행 | Non-Live 전체 완주 |
-| `python run_eval.py --report-only` | 리포트만 재생성 | 기존 결과(score) 기반 |
+```bash
+# 1. 작업 디렉토리 이동
+cd gorilla/berkeley-function-call-leaderboard
 
-### 2. 고급 옵션 (Advanced)
-| 옵션 | 설명 | 예시 |
-| :--- | :--- | :--- |
-| `--models` | 특정 모델만 지정 | `--models "openrouter/qwen3-14b-FC"` |
-| `--categories` | 특정 카테고리만 지정 | `--categories "simple_python,multiple"` |
-| `--sample-size` | 카테고리별 샘플링 실행 | `--sample-size 100` |
-| `--append` | 기존 결과에 누적 실행 | `--append --categories "parallel_multiple"` |
-| `--num-threads` | 동시성(Thread) 제어 | `--num-threads 4` (속도 향상) |
+# 2. 퀵 테스트 실행 (카테고리별 2개씩, 약 1분 소요)
+python run_eval.py --quick
+
+# 3. 결과 확인
+open reports/  # 엑셀 보고서 자동 생성됨
+```
+
+### 실행 흐름
+```
+run_eval.py 실행
+    │
+    ├─➊ 응답 생성 (generate)  → result/*.jsonl
+    ├─➋ AST 채점 (evaluate)   → score/*.json
+    └─➌ 보고서 생성 (report)  → reports/*.xlsx
+```
+
+---
+
+## 📖 CLI 레퍼런스
+
+### 기본 실행 모드
+
+| 명령어 | 설명 | 소요 시간 |
+| :--- | :--- | :---: |
+| `python run_eval.py --quick` | 퀵 테스트 (카테고리별 2개) | ~1분 |
+| `python run_eval.py --full` | 전체 데이터셋 평가 | ~30분+ |
+| `python run_eval.py --report-only` | 기존 결과로 보고서만 재생성 | ~10초 |
+
+### 상세 옵션
+
+```bash
+# 특정 모델만 테스트
+python run_eval.py --quick --models "openrouter/qwen3-14b-FC"
+
+# 특정 카테고리만 테스트
+python run_eval.py --full --categories "simple_python,multiple"
+
+# 샘플링 테스트 (카테고리별 100개씩)
+python run_eval.py --sample-size 100
+
+# 병렬 처리로 속도 향상
+python run_eval.py --full --num-threads 4
+
+# 기존 결과에 추가 실행 (덮어쓰기 방지)
+python run_eval.py --append --categories "parallel"
+
+# 생성 또는 평가 단계 스킵
+python run_eval.py --skip-generate   # 평가+보고서만
+python run_eval.py --skip-evaluate   # 생성+보고서만
+```
+
+### 지원 모델 목록
+
+| 모델 ID | 설명 |
+| :--- | :--- |
+| `openrouter/qwen3-next-80b-a3b-instruct-FC` | Qwen3-Next 80B (권장) |
+| `openrouter/qwen3-14b-FC` | Qwen3 14B (가성비) |
+| `openrouter/qwen3-32b-FC` | Qwen3 32B |
+| `openrouter/mistral-small-3.2-24b-instruct-FC` | Mistral Small 24B |
+| `openrouter/llama-3.3-70b-instruct-FC` | Llama 3.3 70B |
 
 ---
 
