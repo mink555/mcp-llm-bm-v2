@@ -1,7 +1,7 @@
 # MCP-LLM-BM-V2
 
 OpenRouter API를 통한 LLM Function Calling 성능 평가 프로젝트  
-**BFCL (Berkeley Function Calling Leaderboard)** 벤치마크 기반
+**BFCL (Berkeley Function Calling Leaderboard) V4** 벤치마크 기반
 
 ---
 
@@ -18,6 +18,15 @@ OpenRouter API를 통한 LLM Function Calling 성능 평가 프로젝트
 9. [보고서 구조](#보고서-구조)
 10. [디렉토리 구조](#디렉토리-구조)
 11. [참고 자료](#참고-자료)
+
+---
+
+## 🚀 최근 업데이트 (V2.1)
+
+- **평가 범위 확대**: `simple_python`, `multiple`, `parallel` 전체 완주 및 `parallel_multiple` 모델별 100개 샘플 추가.
+- **엑셀 보고서 고도화**: 모든 핵심 지표(Accuracy 등)를 하드코딩 대신 **엑셀 수식 기반**으로 변경하여 데이터 정합성 확보.
+- **상세 분석 컬럼**: `상세` 시트에 파라미터명, 기대 타입, 실제 타입, 실제 값 등 오류 원인 파악을 위한 힌트 컬럼 추가.
+- **CLI 옵션 강화**: `--append`(누적 실행), `--sample-size`(샘플링), `--num-threads`(동시성 제어) 옵션 추가.
 
 ---
 
@@ -126,7 +135,8 @@ Ground Truth: {"math.factorial": {"number": [5]}}
 | 지표 | 설명 |
 |------|------|
 | **Accuracy** | 정답률 (Correct / Total) |
-| **Overall Acc** | 카테고리별 Accuracy의 비가중 평균 |
+| **Overall Acc** | 카테고리별 Accuracy의 비가중 평균 (BFCL 공식 기준) |
+| **Weighted Acc** | 전체 정답 수 / 전체 테스트 수 (Σcorrect / Σtotal) |
 
 ### 에러 유형
 
@@ -371,10 +381,11 @@ python run_eval.py --report-only
 #### `상세` (PASS/FAIL 모두 포함)
 - 개별 `상세`와 동일한 형태 + `모델` 컬럼이 추가됩니다.
 
-### 이번 실행 기준(참고)
-- Non-Live 전체(완주): `simple_python(400)`, `multiple(200)`, `parallel(200)`  × 모델 5개
-- 추가 샘플: `parallel_multiple`은 **모델별 100개 샘플**로 실행
-- 따라서 통합 `상세` 행 수는 \( (400+200+200)\times 5 + 100\times 5 = 4500 \) 입니다.
+### 이번 실행 기준 (V2.1 결과물)
+
+- **Non-Live 전체(완주)**: `simple_python(400)`, `multiple(200)`, `parallel(200)` × 모델 5개
+- **추가 샘플**: `parallel_multiple`은 **모델별 100개 샘플**로 실행 (앞 100개 ID 고정)
+- **통합 상세 규모**: 총 4,500개 행 (\( 800 \times 5 + 100 \times 5 \))
 
 ---
 
@@ -382,24 +393,18 @@ python run_eval.py --report-only
 
 ```
 mcp-llm-bm-v2/
-├── README.md                    # 이 파일
-├── .env                         # API 키 (gitignore)
-├── .gitignore
+├── README.md                    # [문서] 프로젝트 통합 가이드
+├── .env                         # [설정] OpenRouter API 키 (gitignore)
+├── .gitignore                   # [설정] 불필요 파일 제외 규칙
 └── gorilla/
     └── berkeley-function-call-leaderboard/
-        ├── run_eval.py          # 평가 자동화 스크립트
-        ├── excel_reporter.py    # 엑셀 보고서 생성
-        ├── test_case_ids_to_generate.json  # 퀵 테스트 설정
-        ├── bfcl_eval/
-        │   ├── model_handler/
-        │   │   └── api_inference/
-        │   │       └── openrouter.py  # OpenRouter 핸들러
-        │   └── eval_checker/
-        │       └── ast_eval/
-        │           └── ast_checker.py # AST 평가 로직
-        ├── reports/             # 엑셀 보고서 (gitignore)
-        ├── result/              # 모델 응답 결과 (gitignore)
-        └── score/               # 평가 점수 (gitignore)
+        ├── run_eval.py          # [핵심] 평가/채점/리포트 통합 실행 스크립트
+        ├── excel_reporter.py    # [엔진] 엑셀 리포트 생성 로직
+        ├── test_case_ids_to_generate.json  # [데이터] 샘플링/퀵 테스트용 ID 정의
+        ├── bfcl_eval/           # [모듈] BFCL 원본 평가 프레임워크
+        ├── reports/             # [출력] 생성된 엑셀 보고서 (gitignore)
+        ├── result/              # [출력] 모델 응답 원본 (gitignore)
+        └── score/               # [출력] AST 채점 결과 (gitignore)
 ```
 
 ---
