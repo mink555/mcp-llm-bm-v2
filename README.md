@@ -44,15 +44,27 @@
 
 ---
 
-## 🤖 모델별 특성 및 주요 이슈
+## 🤖 모델별 평가 결과
 
-| 모델명 | FC 성능 | 주요 강점 | 관찰된 이슈 (Critical) |
+### 카테고리별 정확도 (%)
+
+| 모델 | Simple | Multiple | Parallel | Parallel Multiple | **평균** |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **Qwen3-14B** | 95.0 | 95.5 | 93.0 | 96.0 | **94.9** |
+| **Qwen3-Next-80B** | 96.8 | 95.0 | 93.5 | 92.0 | **94.3** |
+| **Qwen3-32B** | 93.5 | 89.0 | 89.0 | 93.0 | **91.1** |
+| **Mistral-Small-24B** | 57.8 | 63.0 | 40.5 | 40.0 | **50.3** |
+| **Llama-3.3-70B** | 26.3 | 14.5 | 32.0 | 4.0 | **19.2** |
+
+### 주요 발견 사항
+
+| 모델 | 등급 | 특징 | 주요 오류 유형 |
 | :--- | :---: | :--- | :--- |
-| **Qwen3-Next-80B** | 🥇 최상 | 압도적 정확도, 매우 빠른 응답(1s) | 없음 (가장 안정적) |
-| **Qwen3-14B** | 🥈 우수 | 80B급 성능 유지, 최고의 가성비 | 없음 |
-| **Mistral-Small-24B** | 🥉 보통 | 무난한 성능, 텍스트 기반 호출 지원 | 병렬 호출 시 매칭 실패 간헐적 발생 |
-| **Qwen3-32B** | ⚠️ 주의 | 한국어 대화 품질 우수 | 14B보다 낮은 FC 성능, 긴 지연시간(25s) |
-| **Llama-3.3-70B** | ❌ 부적합 | 일반 대화 및 지시 이행 능력 상급 | **타입 오류**: 숫자를 문자열로 반환하여 실패 다수 |
+| **Qwen3-14B** | 🥇 | 최고 가성비, 80B급 성능 | 타입 오류 (int↔float) 소수 발생 |
+| **Qwen3-Next-80B** | 🥇 | 안정적, Simple 최고점 | 타입 오류 (int↔float) 소수 발생 |
+| **Qwen3-32B** | 🥈 | 준수한 성능 | JSON 파싱 오류, 함수 선택 실패 |
+| **Mistral-Small-24B** | ⚠️ | 불안정 | 함수 호출 대신 텍스트 응답, 파싱 오류 |
+| **Llama-3.3-70B** | ❌ | FC 부적합 | **타입 오류** (숫자→문자열), 함수명 오류 (`.`→`_`) |
 
 ---
 
@@ -62,7 +74,7 @@
 ```bash
 # 저장소 클론 및 이동
 git clone <repository-url>
-cd mcp-llm-bm-v2/gorilla/berkeley-function-call-leaderboard
+cd BFCL-V4-Bench/gorilla/berkeley-function-call-leaderboard
 
 # 패키지 및 리포트 엔진 설치
 pip install -e .
@@ -152,7 +164,7 @@ python run_eval.py --skip-evaluate   # 생성+보고서만
 
 ### 1. 디렉토리 트리
 ```text
-mcp-llm-bm-v2/
+BFCL-V4-Bench/
 ├── 📄 README.md           # 프로젝트 통합 가이드
 ├── ⚙️ .env                # OpenRouter API 키 (보안)
 └── 📂 gorilla/
